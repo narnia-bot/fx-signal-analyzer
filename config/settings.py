@@ -2,15 +2,11 @@
 # 環境変数または直接書き換えて使用
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
-# .env ファイルがあれば読み込む
-_env_path = Path(__file__).parent.parent / ".env"
-if _env_path.exists():
-    for _line in _env_path.read_text().splitlines():
-        _line = _line.strip()
-        if _line and not _line.startswith("#") and "=" in _line:
-            _k, _v = _line.split("=", 1)
-            os.environ.setdefault(_k.strip(), _v.strip())
+# .env ファイルを読み込む
+_env_path = Path(__file__).parent / ".env"
+load_dotenv(_env_path)
 
 # ── Telegram API 設定 ──────────────────────────────────────
 TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
