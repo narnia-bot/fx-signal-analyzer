@@ -8,12 +8,30 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
-import yfinance as yf
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
-SYMBOL = "GC=F"
 CHECK_INTERVAL = 10  # 10秒ごとにチェック
+
+
+async def get_xauusd_price() -> Optional[float]:
+    """metals.live API から XAUUSD 現在価格を取得"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://api.metals.live/v1/spot/gold",
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    # {"gold": 3234.56} 形式
+                    price = data.get("gold") or data.get("price")
+                    if price:
+                        return float(price)
+    except Exception as e:
+        logger.debug(f"metals.live 取得失敗: {e}")
+    return None
 
 
 class PriceMonitor:
@@ -66,13 +84,11 @@ class PriceMonitor:
     async def _check_price(self):
         """現在価格を取得してゾーン監視"""
         try:
-            df = yf.download(SYMBOL, period="1d", interval="1m", progress=False)
-            if df.empty:
+            current_price = await get_xauusd_price()
+            if current_price is None:
                 return
 
-            # 最新のCloseをゾーン侵入チェック
-            current_price = df["Close"].iloc[-1]
-            timestamp = df.index[-1]
+            timestamp = datetime.now(timezone.utc)
 
             for sig_id, zone_info in self.monitored_zones.items():
                 if zone_info["notified_hit"]:
@@ -110,7 +126,7 @@ class PriceMonitor:
             f"{emoji} <b>ZONE HIT!</b>\n"
             f"<b>{direction}</b> ゾーン: {zone_low:.1f}-{zone_high:.1f}\n"
             f"<b>現在価格: {current_price:.1f}</b>\n"
-            f"時刻: {timestamp.strftime('%H:%M:%S')}\n"
+            f"時刻: {timestamp.strftime('%H:%M:%S') if hasattr(timestamp, 'strftime') else str(timestamp)}\n"
             f"\n<i>エントリーしてください</i>"
         )
 
