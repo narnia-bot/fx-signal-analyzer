@@ -4,9 +4,13 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# .env ファイルを読み込む
+# デバッグ: .env の読み込みを確認
 _env_path = Path(__file__).parent / ".env"
+print(f"DEBUG: Looking for .env at {_env_path}")
+print(f"DEBUG: .env exists: {_env_path.exists()}")
 load_dotenv(_env_path)
+print(f"DEBUG: TELEGRAM_API_ID = {os.getenv('TELEGRAM_API_ID')}")
+print(f"DEBUG: TELEGRAM_API_HASH = {os.getenv('TELEGRAM_API_HASH')}")
 
 # ── Telegram API 設定 ──────────────────────────────────────
 TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
@@ -22,12 +26,10 @@ TARGET_CHANNELS = [
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 # ── 価格データ取得 ────────────────────────────────────────
-# ccxt で使う取引所（FXならOANDA, FXCM等; バックテスト用ならYahoo Finance）
-PRICE_EXCHANGE = "binance"  # デモ用。本番はOANDA等に変更
+PRICE_EXCHANGE = "binance"
 
 # ── DB ────────────────────────────────────────────────────
 DB_PATH = "data/signals.db"
 
 # ── 収集設定 ──────────────────────────────────────────────
-# 過去何日分を取得するか（初回起動時）
 HISTORY_DAYS = 30
