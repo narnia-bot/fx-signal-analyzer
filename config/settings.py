@@ -14,7 +14,7 @@ if _env_path.exists():
 
 # ── Telegram API 設定 ──────────────────────────────────────
 TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
-TELEGRAM_API_HASH = os.getenv("TELEGRAM_HASH", "")
+TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "")
 TELEGRAM_PHONE = os.getenv("TELEGRAM_PHONE", "+818066784609")
 
 # 監視するチャンネル（@username または https://t.me/xxx 形式でOK）
