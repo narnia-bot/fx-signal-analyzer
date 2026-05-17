@@ -12,7 +12,7 @@ import yfinance as yf
 
 logger = logging.getLogger(__name__)
 
-SYMBOL = "XAUUSD=X"
+SYMBOL = "GC=F"
 CHECK_INTERVAL = 10  # 10秒ごとにチェック
 
 
