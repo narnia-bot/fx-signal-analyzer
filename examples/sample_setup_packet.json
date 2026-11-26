@@ -1,0 +1,25 @@
+{
+  "v": 1,
+  "secret": "change-me",
+  "kind": "SETUP",
+  "event": "short_setup",
+  "symbol": "BTCUSDT.P",
+  "tickerid": "BINANCE:BTCUSDT.P",
+  "tf": "240",
+  "time": 1762948800000,
+  "bar": {"o": 73350, "h": 73480, "l": 72540, "c": 72600, "v": 18234.5, "body": 750, "body_pct": 79.79, "upper_wick": 130, "lower_wick": 60, "range": 940, "direction": "bear", "pattern": "bearish_engulfing"},
+  "recent": [
+    {"t": 1762891200000, "o": 74100, "h": 74380, "l": 73720, "c": 73900, "v": 9120.2},
+    {"t": 1762905600000, "o": 73900, "h": 74220, "l": 73510, "c": 73640, "v": 8760.4},
+    {"t": 1762920000000, "o": 73640, "h": 73950, "l": 73300, "c": 73480, "v": 9905.1},
+    {"t": 1762934400000, "o": 73480, "h": 73700, "l": 73210, "c": 73350, "v": 7600.8},
+    {"t": 1762948800000, "o": 73350, "h": 73480, "l": 72540, "c": 72600, "v": 18234.5}
+  ],
+  "trend": {"regime": "down", "htf": "down", "htf_tf": "D", "ema20": 73720, "ema50": 74510, "ema200": 76980},
+  "momentum": {"rsi": 38.6, "macd_hist": -112.4, "adx": 29.1, "di_plus": 14.2, "di_minus": 31.7},
+  "volume": {"ratio_20": 1.94, "high": true},
+  "structure": {"bos": "bearish_bos", "swings": "bearish", "swing_high": 74400, "swing_low": 72900, "pdh": 74380, "pdl": 72910},
+  "atr": 1200,
+  "score": {"long": 5, "short": 85, "confluence_long": 1, "confluence_short": 6, "threshold": 70},
+  "setup": {"side": "short", "entry": 72600, "stop": 74400, "target1": 69900, "target2": 67200, "target1_hit": false, "score": 85}
+}

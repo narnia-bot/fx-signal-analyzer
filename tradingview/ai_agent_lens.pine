@@ -1,0 +1,265 @@
+// This Pine Script® code is subject to the terms of the MIT License.
+// AI Agent Lens — ローソク足を AI が読める JSON に変換し、Webhook で送るインジケーター
+//
+// 使い方:
+//   1. TradingView の Pine Editor にこのファイルを丸ごと貼り付けて「チャートに追加」
+//   2. 設定 → 「Webhook シークレット」をサーバー側の WEBHOOK_SECRET と同じ値にする
+//   3. アラート作成 → 条件: 「AI Agent Lens」→「alert() 関数呼び出しのみ」
+//      → 通知: Webhook URL に https://<あなたのサーバー>/webhook を設定
+//      （メッセージ欄は空でよい。alert() が JSON を本文として送る）
+//
+// 判定はすべて「確定した足」で行う（リペイントしない）。
+//@version=6
+indicator("AI Agent Lens", shorttitle = "AI Lens", overlay = true, max_lines_count = 300, max_labels_count = 300, max_boxes_count = 200)
+
+// ───────────────────────── Inputs ─────────────────────────
+grpS      = "シグナル"
+threshold = input.int(70, "シグナル閾値 (0-100)", minval = 40, maxval = 100, group = grpS)
+htfTf     = input.timeframe("D", "上位足", group = grpS)
+atrLen    = input.int(14, "ATR 期間", minval = 1, group = grpS)
+atrMult   = input.float(1.5, "損切り幅 (ATR 倍率)", minval = 0.1, step = 0.1, group = grpS)
+rr1       = input.float(1.5, "利確① (R 倍数)", minval = 0.1, step = 0.1, group = grpS)
+rr2       = input.float(3.0, "利確② (R 倍数)", minval = 0.1, step = 0.1, group = grpS)
+pivotLen  = input.int(5, "スイング判定本数", minval = 2, group = grpS)
+
+grpW         = "Webhook"
+secret       = input.string("change-me", "Webhook シークレット", group = grpW)
+sendEveryBar = input.bool(true, "毎足のデータも送る（ペーパートレードの決済判定に使う）", group = grpW)
+
+grpD       = "表示"
+showCard   = input.bool(true, "シグナルカード", group = grpD)
+showLevels = input.bool(true, "エントリー / 損切り / 利確 ライン", group = grpD)
+showEma    = input.bool(true, "EMA 20 / 50 / 200", group = grpD)
+showPd     = input.bool(true, "前日高値 / 安値", group = grpD)
+
+// ───────────────────────── Helpers ─────────────────────────
+pxDecimals = math.max(0, int(math.ceil(-math.log10(syminfo.mintick) - 1e-9)))
+pxFmt      = pxDecimals == 0 ? "0" : "0." + str.repeat("#", pxDecimals)
+
+f_px(float x) =>
+    na(x) ? "null" : str.tostring(x, pxFmt)
+
+f_dec(float x) =>
+    na(x) ? "null" : str.tostring(x, "0.##")
+
+f_bool(bool b) =>
+    b ? "true" : "false"
+
+f_pts(bool cond, int pts) =>
+    cond ? pts : 0
+
+// ───────────────────────── ローソク足の分解 ─────────────────────────
+rng     = high - low
+body    = math.abs(close - open)
+upWick  = high - math.max(open, close)
+loWick  = math.min(open, close) - low
+bodyPct = rng > 0 ? body / rng * 100 : 0.0
+isBull  = close > open
+isBear  = close < open
+
+bullEngulf   = isBull and isBear[1] and close >= open[1] and open <= close[1] and body > body[1]
+bearEngulf   = isBear and isBull[1] and close <= open[1] and open >= close[1] and body > body[1]
+hammer       = rng > 0 and loWick >= 2 * body and upWick <= body and loWick / rng >= 0.6
+shootingStar = rng > 0 and upWick >= 2 * body and loWick <= body and upWick / rng >= 0.6
+bullMaru     = isBull and bodyPct >= 85
+bearMaru     = isBear and bodyPct >= 85
+doji         = rng > 0 and bodyPct <= 10
+insideBar    = high < high[1] and low > low[1]
+
+pattern = bullEngulf ? "bullish_engulfing" : bearEngulf ? "bearish_engulfing" : hammer ? "hammer" : shootingStar ? "shooting_star" : bullMaru ? "bullish_marubozu" : bearMaru ? "bearish_marubozu" : doji ? "doji" : insideBar ? "inside_bar" : "none"
+bullPattern = bullEngulf or hammer or bullMaru
+bearPattern = bearEngulf or shootingStar or bearMaru
+
+// ───────────────────────── トレンド / モメンタム / 出来高 ─────────────────────────
+emaF = ta.ema(close, 20)
+emaS = ta.ema(close, 50)
+emaT = ta.ema(close, 200)
+regime = emaF > emaS and close > emaS ? "up" : emaF < emaS and close < emaS ? "down" : "range"
+
+// 上位足の方向（確定済みの上位足のみ参照してリペイントを防ぐ）
+htfDir = request.security(syminfo.tickerid, htfTf, close[1] > ta.ema(close, 50)[1] ? 1 : -1, lookahead = barmerge.lookahead_on)
+htfStr = htfDir == 1 ? "up" : "down"
+
+rsi = ta.rsi(close, 14)
+[macdLine, macdSignal, macdHist] = ta.macd(close, 12, 26, 9)
+[diPlus, diMinus, adx] = ta.dmi(14, 14)
+atr = ta.atr(atrLen)
+
+volMa    = ta.sma(volume, 20)
+volRatio = na(volMa) or volMa == 0 ? na : volume / volMa
+volHigh  = nz(volRatio, 0) >= 1.2
+
+// ───────────────────────── 相場構造 ─────────────────────────
+ph = ta.pivothigh(high, pivotLen, pivotLen)
+pl = ta.pivotlow(low, pivotLen, pivotLen)
+
+var float swingHigh     = na
+var float swingLow      = na
+var float prevSwingHigh = na
+var float prevSwingLow  = na
+if not na(ph)
+    prevSwingHigh := swingHigh
+    swingHigh     := ph
+if not na(pl)
+    prevSwingLow := swingLow
+    swingLow     := pl
+
+crossUp = ta.crossover(close, swingHigh)
+crossDn = ta.crossunder(close, swingLow)
+
+var int lastBosDir = 0
+var int lastBosBar = na
+if crossUp
+    lastBosDir := 1
+    lastBosBar := bar_index
+if crossDn
+    lastBosDir := -1
+    lastBosBar := bar_index
+recentBos = not na(lastBosBar) and bar_index - lastBosBar <= 20
+
+swingStruct = swingHigh > prevSwingHigh and swingLow > prevSwingLow ? "bullish" : swingHigh < prevSwingHigh and swingLow < prevSwingLow ? "bearish" : "mixed"
+bosStr      = recentBos ? (lastBosDir == 1 ? "bullish_bos" : "bearish_bos") : "none"
+structBull  = (recentBos and lastBosDir == 1) or swingStruct == "bullish"
+structBear  = (recentBos and lastBosDir == -1) or swingStruct == "bearish"
+
+pdh = request.security(syminfo.tickerid, "D", high[1], lookahead = barmerge.lookahead_on)
+pdl = request.security(syminfo.tickerid, "D", low[1], lookahead = barmerge.lookahead_on)
+
+// ───────────────────────── スコアリング (0-100) ─────────────────────────
+// 地合い20 / 上位足20 / 構造15 / モメンタム15 / ローソク足15 / 出来高10 / ADX5
+momLong  = rsi > 50 and rsi < 70 and macdHist > 0
+momShort = rsi < 50 and rsi > 30 and macdHist < 0
+trending = adx >= 20
+
+longScore  = f_pts(regime == "up", 20) + f_pts(htfDir == 1, 20) + f_pts(structBull, 15) + f_pts(momLong, 15) + f_pts(bullPattern, 15) + f_pts(volHigh, 10) + f_pts(trending, 5)
+shortScore = f_pts(regime == "down", 20) + f_pts(htfDir == -1, 20) + f_pts(structBear, 15) + f_pts(momShort, 15) + f_pts(bearPattern, 15) + f_pts(volHigh, 10) + f_pts(trending, 5)
+longConf   = (regime == "up" ? 1 : 0) + (htfDir == 1 ? 1 : 0) + (structBull ? 1 : 0) + (momLong ? 1 : 0) + (bullPattern ? 1 : 0) + (volHigh ? 1 : 0) + (trending ? 1 : 0)
+shortConf  = (regime == "down" ? 1 : 0) + (htfDir == -1 ? 1 : 0) + (structBear ? 1 : 0) + (momShort ? 1 : 0) + (bearPattern ? 1 : 0) + (volHigh ? 1 : 0) + (trending ? 1 : 0)
+
+// ───────────────────────── セットアップ管理 ─────────────────────────
+var string activeSide = ""
+var float  tEntry     = na
+var float  tStop      = na
+var float  tT1        = na
+var float  tT2        = na
+var bool   t1Hit      = false
+var int    tScore     = 0
+string     event      = ""
+
+// 既存セットアップの進行（エントリーした足の次の足から判定。損切りを優先＝保守的）
+if barstate.isconfirmed and activeSide == "long"
+    if low <= tStop
+        event      := t1Hit ? "breakeven_stop" : "stop_hit"
+        activeSide := ""
+    else if high >= tT2
+        event      := "target2_hit"
+        activeSide := ""
+    else if not t1Hit and high >= tT1
+        t1Hit := true
+        tStop := tEntry
+        event := "target1_hit"
+else if barstate.isconfirmed and activeSide == "short"
+    if high >= tStop
+        event      := t1Hit ? "breakeven_stop" : "stop_hit"
+        activeSide := ""
+    else if low <= tT2
+        event      := "target2_hit"
+        activeSide := ""
+    else if not t1Hit and low <= tT1
+        t1Hit := true
+        tStop := tEntry
+        event := "target1_hit"
+
+canSignal  = barstate.isconfirmed and activeSide == "" and event == "" and not na(atr)
+longSetup  = canSignal and longScore >= threshold and longScore > shortScore
+shortSetup = canSignal and shortScore >= threshold and shortScore > longScore
+
+if longSetup or shortSetup
+    float dir  = longSetup ? 1.0 : -1.0
+    float risk = atrMult * atr
+    activeSide := longSetup ? "long" : "short"
+    tEntry     := close
+    tStop      := close - dir * risk
+    tT1        := close + dir * risk * rr1
+    tT2        := close + dir * risk * rr2
+    t1Hit      := false
+    tScore     := longSetup ? longScore : shortScore
+    event      := longSetup ? "long_setup" : "short_setup"
+
+    label.new(bar_index, longSetup ? low : high, (longSetup ? "LONG " : "SHORT ") + str.tostring(tScore), style = longSetup ? label.style_label_up : label.style_label_down, color = longSetup ? color.new(color.teal, 0) : color.new(color.red, 0), textcolor = color.white, size = size.small)
+
+    if showLevels
+        int x2 = bar_index + 30
+        box.new(bar_index, math.max(tEntry, tStop), x2, math.min(tEntry, tStop), border_color = color.new(color.red, 60), bgcolor = color.new(color.red, 85), text = "RISK 1R", text_size = size.tiny, text_color = color.new(color.red, 20))
+        box.new(bar_index, math.max(tEntry, tT2), x2, math.min(tEntry, tT2), border_color = color.new(color.teal, 60), bgcolor = color.new(color.teal, 88), text = "REWARD " + str.tostring(rr2) + "R", text_size = size.tiny, text_color = color.new(color.teal, 20))
+        line.new(bar_index, tT1, x2, tT1, color = color.new(color.teal, 0), style = line.style_dashed)
+        label.new(x2, tEntry, "ENTRY " + str.tostring(tEntry, pxFmt), style = label.style_label_left, color = color.new(color.gray, 20), textcolor = color.white, size = size.tiny)
+        label.new(x2, tStop, "STOP " + str.tostring(tStop, pxFmt), style = label.style_label_left, color = color.new(color.red, 20), textcolor = color.white, size = size.tiny)
+        label.new(x2, tT1, "T1 " + str.tostring(tT1, pxFmt), style = label.style_label_left, color = color.new(color.teal, 20), textcolor = color.white, size = size.tiny)
+        label.new(x2, tT2, "T2 " + str.tostring(tT2, pxFmt), style = label.style_label_left, color = color.new(color.teal, 20), textcolor = color.white, size = size.tiny)
+
+if event == "target1_hit" or event == "target2_hit" or event == "stop_hit" or event == "breakeven_stop"
+    string evText = event == "target1_hit" ? "T1 ✓" : event == "target2_hit" ? "T2 ✓" : event == "stop_hit" ? "STOP" : "BE"
+    label.new(bar_index, event == "stop_hit" or event == "breakeven_stop" ? high : low, evText, style = label.style_label_center, color = color.new(color.gray, 30), textcolor = color.white, size = size.tiny)
+
+// ───────────────────────── 描画 ─────────────────────────
+plot(showEma ? emaF : na, "EMA 20", color = color.new(color.orange, 0))
+plot(showEma ? emaS : na, "EMA 50", color = color.new(color.aqua, 0))
+plot(showEma ? emaT : na, "EMA 200", color = color.new(color.purple, 0), linewidth = 2)
+plot(showPd ? pdh : na, "PDH", color = color.new(color.gray, 30), style = plot.style_linebr)
+plot(showPd ? pdl : na, "PDL", color = color.new(color.gray, 30), style = plot.style_linebr)
+
+var table card = table.new(position.top_right, 2, 13, bgcolor = color.new(#131722, 5), frame_color = color.new(color.gray, 60), frame_width = 1, border_width = 0)
+
+f_row(int row, string k, string v, color vc) =>
+    table.cell(card, 0, row, k, text_color = color.new(color.white, 35), text_size = size.small, text_halign = text.align_left)
+    table.cell(card, 1, row, v, text_color = vc, text_size = size.small, text_halign = text.align_right)
+
+if showCard and barstate.islast
+    bool   inTrade  = activeSide != ""
+    bool   biasLong = inTrade ? activeSide == "long" : longScore >= shortScore
+    color  sideCol  = biasLong ? color.teal : color.red
+    string head     = inTrade ? str.upper(activeSide) + "  " + str.tostring(tScore) : (biasLong ? "LONG" : "SHORT") + " bias  " + str.tostring(biasLong ? longScore : shortScore)
+    table.cell(card, 0, 0, "AI AGENT LENS", text_color = color.white, text_size = size.small, text_halign = text.align_left)
+    table.cell(card, 1, 0, head, text_color = color.white, bgcolor = sideCol, text_size = size.normal)
+    f_row(1, "Status", inTrade ? (t1Hit ? "Target 1 hit / risk-free" : "Setup active") : "Watching", color.white)
+    f_row(2, "Long / Short", str.tostring(longScore) + " / " + str.tostring(shortScore), color.white)
+    f_row(3, "Confluence", str.tostring(biasLong ? longConf : shortConf) + " of 7 aligned", color.white)
+    f_row(4, "Regime / HTF", regime + " / " + htfStr, regime == "up" ? color.teal : regime == "down" ? color.red : color.gray)
+    f_row(5, "Entry", inTrade ? str.tostring(tEntry, pxFmt) : "-", color.white)
+    f_row(6, "Stop", inTrade ? str.tostring(tStop, pxFmt) : "-", color.red)
+    f_row(7, "Targets", inTrade ? str.tostring(tT1, pxFmt) + " / " + str.tostring(tT2, pxFmt) : "-", color.teal)
+    f_row(8, "RSI / ADX", str.tostring(rsi, "0.0") + " / " + str.tostring(adx, "0.0"), color.white)
+    f_row(9, "Candle", pattern, bullPattern ? color.teal : bearPattern ? color.red : color.white)
+    f_row(10, "Structure", bosStr + " / " + swingStruct, color.white)
+    f_row(11, "Volume", na(volRatio) ? "n/a" : str.tostring(volRatio, "0.00") + "x", volHigh ? color.yellow : color.white)
+    f_row(12, "ATR", str.tostring(atr, pxFmt), color.white)
+
+// ───────────────────────── JSON パケット ─────────────────────────
+f_bar(int i) =>
+    '{"t":' + str.tostring(time[i]) + ',"o":' + f_px(open[i]) + ',"h":' + f_px(high[i]) + ',"l":' + f_px(low[i]) + ',"c":' + f_px(close[i]) + ',"v":' + f_dec(volume[i]) + '}'
+
+f_packet(string kind) =>
+    string recent = "["
+    for i = 4 to 0
+        recent += f_bar(i) + (i > 0 ? "," : "")
+    recent += "]"
+    string setupJson = activeSide == "" ? "null" : '{"side":"' + activeSide + '","entry":' + f_px(tEntry) + ',"stop":' + f_px(tStop) + ',"target1":' + f_px(tT1) + ',"target2":' + f_px(tT2) + ',"target1_hit":' + f_bool(t1Hit) + ',"score":' + str.tostring(tScore) + '}'
+    '{"v":1,"secret":"' + secret + '","kind":"' + kind + '","event":"' + event + '"' +
+     ',"symbol":"' + syminfo.ticker + '","tickerid":"' + syminfo.tickerid + '","tf":"' + timeframe.period + '","time":' + str.tostring(time) +
+     ',"bar":{"o":' + f_px(open) + ',"h":' + f_px(high) + ',"l":' + f_px(low) + ',"c":' + f_px(close) + ',"v":' + f_dec(volume) +
+     ',"body":' + f_px(body) + ',"body_pct":' + f_dec(bodyPct) + ',"upper_wick":' + f_px(upWick) + ',"lower_wick":' + f_px(loWick) + ',"range":' + f_px(rng) +
+     ',"direction":"' + (isBull ? "bull" : isBear ? "bear" : "flat") + '","pattern":"' + pattern + '"}' +
+     ',"recent":' + recent +
+     ',"trend":{"regime":"' + regime + '","htf":"' + htfStr + '","htf_tf":"' + htfTf + '","ema20":' + f_px(emaF) + ',"ema50":' + f_px(emaS) + ',"ema200":' + f_px(emaT) + '}' +
+     ',"momentum":{"rsi":' + f_dec(rsi) + ',"macd_hist":' + f_px(macdHist) + ',"adx":' + f_dec(adx) + ',"di_plus":' + f_dec(diPlus) + ',"di_minus":' + f_dec(diMinus) + '}' +
+     ',"volume":{"ratio_20":' + f_dec(volRatio) + ',"high":' + f_bool(volHigh) + '}' +
+     ',"structure":{"bos":"' + bosStr + '","swings":"' + swingStruct + '","swing_high":' + f_px(swingHigh) + ',"swing_low":' + f_px(swingLow) + ',"pdh":' + f_px(pdh) + ',"pdl":' + f_px(pdl) + '}' +
+     ',"atr":' + f_px(atr) +
+     ',"score":{"long":' + str.tostring(longScore) + ',"short":' + str.tostring(shortScore) + ',"confluence_long":' + str.tostring(longConf) + ',"confluence_short":' + str.tostring(shortConf) + ',"threshold":' + str.tostring(threshold) + '}' +
+     ',"setup":' + setupJson + '}'
+
+if barstate.isconfirmed
+    string kind = event == "long_setup" or event == "short_setup" ? "SETUP" : event != "" ? "TRADE_UPDATE" : "BAR"
+    if kind != "BAR" or sendEveryBar
+        alert(f_packet(kind), alert.freq_once_per_bar_close)
