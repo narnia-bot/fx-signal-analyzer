@@ -30,7 +30,15 @@ python main.py collect
 
 # 統計レポート表示
 python main.py stats
+
+# AI Agent Lens（TradingView → Claude 判断 → ペーパートレード → LINE/Telegram 通知）
+python main.py webhook                                     # Webhook 受信サーバー
+python main.py ai-replay examples/sample_setup_packet.json # パケットを手動で流す（--no-ai で Claude なし）
+python main.py paper                                       # ペーパートレード成績
+python -m unittest discover tests                          # テスト（Claude 不要）
 ```
+
+AI Agent Lens の詳細は `docs/AI_AGENT_LENS.md`。
 
 ## ディレクトリ構成
 ```
@@ -47,6 +55,12 @@ fx-signal-analyzer/
 │   └── database.py        ← SQLite永続化
 ├── analyzers/
 │   └── stats_analyzer.py  ← 統計分析
+├── ai_agent/              ← AI Agent Lens（Webhook受信・Claude判断・ペーパートレード・通知）
+│   └── prompts/trader_system.md  ← Claude に渡す判断プロンプト
+├── tradingview/
+│   └── ai_agent_lens.pine ← TradingView インジケーター（Pine Editor に貼る）
+├── examples/              ← サンプルパケット
+├── tests/                 ← テスト
 ├── data/
 │   └── signals.db         ← データベース（自動生成）
 └── session/               ← Telegramセッション（自動生成）

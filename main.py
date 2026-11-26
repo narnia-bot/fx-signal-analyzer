@@ -38,6 +38,42 @@ def cmd_chart_analyze(args):
     analyzer = EntryReasonAnalyzer(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     analyzer.run(force=getattr(args, "force", False))
 
+def cmd_webhook(args):
+    """TradingView (AI Agent Lens) の Webhook を受信して Claude に判断させる"""
+    from ai_agent.server import serve
+    serve()
+
+
+def cmd_ai_replay(args):
+    """保存した JSON パケットをパイプラインに流す（TradingView なしで動作確認）"""
+    import json
+    from ai_agent.pipeline import Pipeline
+    with open(args.file, encoding="utf-8") as f:
+        packet = json.load(f)
+    packet.pop("secret", None)
+    result = Pipeline(use_ai=not args.no_ai).process(packet)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_paper(args):
+    """ペーパートレードの成績を表示する"""
+    from ai_agent.config import AgentConfig
+    from ai_agent.store import AgentStore
+    from ai_agent.paper_trader import PaperTrader
+    cfg = AgentConfig()
+    trader = PaperTrader(AgentStore(cfg.db_path), cfg.initial_equity)
+    s = trader.stats()
+    print("\n=== AI Agent Lens ペーパートレード ===")
+    print(f"口座残高     : {s['equity']:,.2f}  ({s['return_pct']:+.2f}%)")
+    print(f"決済済み     : {s['closed_trades']} 件 / 保有中 {s['open_trades']} 件")
+    print(f"勝率         : {s['win_rate'] if s['win_rate'] is not None else '-'} %")
+    print(f"PF           : {s['profit_factor'] if s['profit_factor'] is not None else '-'}")
+    print(f"平均 R       : {s['avg_r'] if s['avg_r'] is not None else '-'}")
+    for t in trader.open_trades():
+        print(f"  保有中 {t['tickerid']} {t['tf']} {t['side']} @ {t['entry']} SL {t['stop']} "
+              f"T1 {t['target1']}{' ✓' if t['target1_hit'] else ''} T2 {t['target2']}")
+
+
 def cmd_test_parse(args):
     """パーサーをテストする（Telegram不要）"""
     from datetime import datetime, timezone
@@ -92,6 +128,11 @@ if __name__ == "__main__":
     p_chart = sub.add_parser("chart-analyze", help="チャートデータを使ったエントリー根拠分析")
     p_chart.add_argument("--force", action="store_true", help="分析済み件数も再実行する")
     sub.add_parser("test",          help="パーサーをテスト（Telegram不要）")
+    sub.add_parser("webhook",       help="TradingView Webhook 受信 → Claude 判断 → ペーパートレード")
+    p_replay = sub.add_parser("ai-replay", help="JSON パケットを手動でパイプラインに流す")
+    p_replay.add_argument("file", help="例: examples/sample_setup_packet.json")
+    p_replay.add_argument("--no-ai", action="store_true", help="Claude を呼ばずに保存・決済判定だけ行う")
+    sub.add_parser("paper",         help="ペーパートレード成績を表示")
 
     args = parser.parse_args()
 
@@ -105,5 +146,11 @@ if __name__ == "__main__":
         cmd_chart_analyze(args)
     elif args.command == "test":
         cmd_test_parse(args)
+    elif args.command == "webhook":
+        cmd_webhook(args)
+    elif args.command == "ai-replay":
+        cmd_ai_replay(args)
+    elif args.command == "paper":
+        cmd_paper(args)
     else:
         parser.print_help()
