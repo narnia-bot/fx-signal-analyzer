@@ -25,7 +25,7 @@ def _int(name: str, default: int) -> int:
 @dataclass
 class AgentConfig:
     # Claude
-    model: str = field(default_factory=lambda: os.getenv("AI_AGENT_MODEL", "claude-fable-5-2"))
+    model: str = field(default_factory=lambda: os.getenv("AI_AGENT_MODEL", "claude-opus-5-5"))
     effort: str = field(default_factory=lambda: os.getenv("AI_AGENT_EFFORT", "high"))
 
     # Webhook

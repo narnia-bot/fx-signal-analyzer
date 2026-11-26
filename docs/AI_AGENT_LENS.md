@@ -113,7 +113,7 @@ Telegram を使う場合は既存の `TELEGRAM_BOT_TOKEN` / `TELEGRAM_USER_ID` �
 | 変数 | 初期値 | 説明 |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | – | Claude API キー |
-| `AI_AGENT_MODEL` | `claude-fable-5-2` | 判断に使うモデル。安くしたいなら `claude-opus-5-5` など |
+| `AI_AGENT_MODEL` | `claude-opus-5-5` | 判断に使うモデル（`claude-fable-5-2` も可） |
 | `AI_AGENT_EFFORT` | `high` | `low` / `medium` / `high` / `xhigh` / `max` |
 | `WEBHOOK_SECRET` | – | **必須**。インジケーターの設定と同じ値 |
 | `PORT` / `WEBHOOK_HOST` / `WEBHOOK_PATH` | `8080` / `0.0.0.0` / `/webhook` | 待ち受け |
